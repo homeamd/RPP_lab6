@@ -1,0 +1,73 @@
+import logging
+import os
+
+from aiogram import Bot, Dispatcher, executor, types
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+
+logging.basicConfig(level=logging.INFO)
+
+bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+bot = Bot(token=bot_token)
+dp = Dispatcher(bot, storage=MemoryStorage())
+
+rates = {}
+
+@dp.message_handler(commands=['start'])
+async def send_welcome(message: types.Message):
+    await message.reply("Привет! Я бот для конвертации валют.\n"
+                        "Добавить валюту /save_currency\n"
+                        "Конвертировать /convert")
+
+@dp.message_handler(commands=['save_currency'])
+async def save_currency(message: types.Message):
+    await message.reply("Введите название валюты:")
+    await dp.current_state(chat=message.chat.id, user=message.from_user.id).set_state('waiting_currency_name')
+
+@dp.message_handler(state='waiting_currency_name')
+async def process_currency_name(message: types.Message):
+    rates_key = message.text.upper()
+    await message.reply("Введите курс валюты к рублю:")
+    await dp.current_state(chat=message.chat.id, user=message.from_user.id).update_data(rates_key=rates_key)
+    await dp.current_state(chat=message.chat.id, user=message.from_user.id).set_state('waiting_currency_rate')
+
+@dp.message_handler(state='waiting_currency_rate')
+async def process_currency_rate(message: types.Message):
+    data = await dp.current_state(chat=message.chat.id, user=message.from_user.id).get_data()
+    rates_key = data['rates_key']
+    rates[rates_key] = rates_value
+    await message.reply(f"Курс валюты {rates_key} сохранен: {rates_value:.2f} RUB.")
+    await dp.current_state(chat=message.chat.id, user=message.from_user.id).reset_state()
+@dp.message_handler(commands=['convert'])
+async def convert_currency(message: types.Message):
+    await message.reply("Введите название валюты, которую нужно конвертировать:")
+    await dp.current_state(chat=message.chat.id, user=message.from_user.id).set_state(
+        'waiting_currency_for_conversion')
+
+@dp.message_handler(state='waiting_currency_for_conversion')
+async def process_currency_for_conversion(message: types.Message):
+    rates_key = message.text.upper()
+    if rates_key not in rates:
+        await message.reply(f"Курс валюты {rates_key} не найден.")
+        await dp.current_state(chat=message.chat.id, user=message.from_user.id).reset_state()
+        return
+    await message.reply(f"Введите сумму в валюте {rates_key} для конвертации в рубли:")
+    await dp.current_state(chat=message.chat.id, user=message.from_user.id).update_data(rates_key=rates_key)
+    await dp.current_state(chat=message.chat.id, user=message.from_user.id).set_state('waiting_currency_amount')
+
+@dp.message_handler(state='waiting_currency_amount')
+async def process_currency_amount(message: types.Message):
+    data = await dp.current_state(chat=message.chat.id, user=message.from_user.id).get_data()
+    rates_key = data['rates_key']
+    rates_value = rates[rates_key]
+    converted_amount = amount * rates_value
+
+    await message.reply(f"{amount:.2f} {rates_key} = {converted_amount:.2f} RUB")
+    await dp.current_state(chat=message.chat.id, user=message.from_user.id).reset_state()
+
+@dp.message_handler()
+async def echo(message: types.Message):
+    await message.reply("Извините, произошла ошибка\n"
+                        "Используйте команду /start, чтобы начать работу.")
+
+if __name__ == '__main__':
+    executor.start_polling(dp,skip_updates=True)
